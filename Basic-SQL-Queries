@@ -1,0 +1,158 @@
+--#TEST
+--#1. Seleccione todos los registros de la tabla PRODUC
+SELECT *
+FROM PRODUCT 
+;
+
+--#2.Seleccione todas las ventas del primero de Diciembre 2021
+SELECT *
+FROM INVOICES 
+WHERE inv_date = '2021-12-01' 
+;	
+
+--#3 Seleccione todos los clientes que viven en Mexico
+
+SELECT DISTINCT CLIENT_ID, first_name, last_name
+FROM CLIENTS 
+WHERE country = 'Mexico'
+;					
+
+--#4 Seleccione todos los productos que se vendieron en la factura 25
+
+SELECT PRODUCT.PRODUCT_ID, PRODUCT.PRODUCT_NAME, *
+FROM INVOICES INV 
+LEFT JOIN CLIENTS TS ON inv.client_id = TS.client_id
+LEFT JOIN PRODUCT ON PRODUCT.PRODUCT_ID = INV.PRODUCT_ID 
+LEFT JOIN PRICE PC ON PRODUCT.PRODUCT_ID = PC.PRODUCT_ID 
+WHERE INVOICE_ID = 25 
+;
+
+--#5 Â¿Cuantos productos diferentes se venden en Colombia?
+
+SELECT count (DISTINCT PS.PRODUCT_ID) AS count
+FROM PRODUCT ps
+LEFT JOIN PRICE PC ON ps.PRODUCT_ID = PC.PRODUCT_ID 
+WHERE pc.country = 'Colombia'
+;
+
+
+
+--#6 Seleccione todos los clientes que viven en Cartagena
+
+SELECT DISTINCT TS.* 
+FROM CLIENTS TS 
+WHERE ts.city = 'Cartagena'
+;
+
+--#7 Â¿Cuantos clientes viven en la ciudad Guadalajara?
+
+SELECT count (DISTINCT TS.client_id) AS count
+from CLIENTS TS 
+WHERE ts.city = 'Guadalajara'
+;
+
+--#8 Â¿CuÃ¡l fue el monto total facturado en Mexico en Diciembre 2021?
+
+SELECT pc.COUNTRY, sum(amount_eur) as Monto_total_facturado
+FROM INVOICES INV
+LEFT JOIN CLIENTS TS ON inv.client_id = TS.client_id
+LEFT JOIN PRODUCT ps ON ps.PRODUCT_ID = INV.PRODUCT_ID 
+LEFT JOIN PRICE PC ON ps.PRODUCT_ID = PC.PRODUCT_ID 
+WHERE MONTH(inv_date) = 12
+AND YEAR(INV_date) = 2021
+AND inv.COUNTRY_CODE  = 30
+group BY 1
+;
+
+--#9 Â¿Cuantos productos "producto_1" se vendieron en Colombia desde el primero hasta el 15 de diciembre 2021?
+
+SELECT PS.PRODUCT_NAME, SUM(INV.QUANTITY) AS total_productos 
+FROM INVOICES INV
+LEFT JOIN CLIENTS TS ON inv.client_id = TS.client_id
+LEFT JOIN PRODUCT ps ON ps.PRODUCT_ID = INV.PRODUCT_ID 
+LEFT JOIN PRICE PC ON ps.PRODUCT_ID = PC.PRODUCT_ID 
+WHERE inv_date BETWEEN '2021-12-01' AND '2021-12-15'
+AND inv.COUNTRY_CODE  = 10
+AND PS.PRODUCT_NAME = 'producto_1'
+group BY 1
+;
+        
+--#10 Â¿CuÃ¡ntas veces comprÃ² el cliente C10 en MÃ©xico?
+
+SELECT TS.client_id, COUNT(DISTINCT INVOICE_ID) AS total_compras
+FROM INVOICES INV
+LEFT JOIN CLIENTS TS ON inv.client_id = TS.client_id
+LEFT JOIN PRODUCT ps ON ps.PRODUCT_ID = INV.PRODUCT_ID 
+LEFT JOIN PRICE PC ON ps.PRODUCT_ID = PC.PRODUCT_ID 
+WHERE inv.CLIENT_ID = 'C10'
+AND inv.COUNTRY_CODE  = 30
+group BY 1
+;
+    
+--#11 Â¿CuÃ¡nto gastÃ² el cliente C17 en Diciembre para la compra del "producto_6"?
+
+SELECT INV.client_id, sum(AMOUNT_EUR) AS total_gastado
+FROM INVOICES INV
+LEFT JOIN CLIENTS TS ON inv.client_id = TS.client_id
+LEFT JOIN PRODUCT ps ON ps.PRODUCT_ID = INV.PRODUCT_ID 
+LEFT JOIN PRICE PC ON ps.PRODUCT_ID = PC.PRODUCT_ID 
+WHERE inv.CLIENT_ID = 'C17'
+AND MONTH(inv_date) = 12
+AND YEAR(INV_date) = 2021
+AND PS.PRODUCT_NAME = 'producto_6'
+group BY 1
+;       
+--#12 Seleccione la facturaciÃ²n total de los dos Paises en el mes de diciembre agrupandola por Pais
+
+SELECT inv.COUNTRY_CODE, pc.COUNTRY, sum(AMOUNT_EUR) AS total_facturado
+FROM INVOICES INV
+LEFT JOIN CLIENTS TS ON inv.client_id = TS.client_id
+LEFT JOIN PRODUCT ps ON ps.PRODUCT_ID = INV.PRODUCT_ID 
+LEFT JOIN PRICE PC ON ps.PRODUCT_ID = PC.PRODUCT_ID 
+WHERE  MONTH(inv_date) = 12
+AND YEAR(INV_date) = 2021
+group BY 1, 2
+;
+
+--#13 Seleccione la tabla INVOICE agregando el indicador "price_type" que informe si el precio por producto fue "STANDARD" o "PROMO"
+
+WITH STG_INV_TABLE AS (
+SELECT *, (inv.quantity * pc.PRICE_STANDARD) AS STD_amount, ((inv.quantity * pc.PRICE_STANDARD)-AMOUNT_EUR) AS DISCOUNT_amount
+FROM INVOICES INV 
+LEFT JOIN CLIENTS TS ON inv.client_id = TS.client_id
+LEFT JOIN PRODUCT ps ON ps.PRODUCT_ID = INV.PRODUCT_ID 
+LEFT JOIN PRICE PC ON ps.PRODUCT_ID = PC.PRODUCT_ID 
+)
+SELECT *, CASE WHEN DISCOUNT_amount = 0 THEN 'STD'
+WHEN discount_amount > 0 THEN 'PROMO'
+END AS "price_type"
+FROM STG_INV_TABLE
+;
+--#14 "Dada la informaciÃ²n disponible en las tablas, cree un dashboard utilizando Tableau
+Hallazgos
+Tendencia de ventas:
+La línea de tendencia de ventas es positiva, indicando un crecimiento general en las ventas.
+Descuentos promedios:
+En Colombia, el promedio de descuento otorgado es del 20%; en México, es del 19.5%. La diferencia es mínima, lo que sugiere estrategias de precios relativamente homogéneas.
+Torreón y Puebla:
+Torreón tiene el cheque promedio más alto sin descuentos, mientras que Puebla lidera en monto total facturado. Esto indica un mercado activo en Puebla, pero clientes dispuestos a pagar más en Torreón.
+Producto_4:
+Es el segundo más vendido, pero ha recibido los mayores descuentos, sugiriendo dependencia en promociones para impulsar ventas.
+Cliente sin facturación:
+Hay un cliente en la base de datos que no ha facturado, lo que puede indicar la necesidad de una estrategia de retención o activación.
+
+Recomendaciones
+Revisar estrategias de descuentos:
+Optimizar los descuentos en productos clave en ambos países para preservar márgenes y aplicar descuentos dirigidos para atraer nuevos clientes.
+Fortalecer percepción de valor:
+Mejorar la comunicación del valor de los productos para reducir la dependencia de descuentos y justificar precios.
+Monitorear márgenes:
+Realizar un seguimiento constante del impacto de los descuentos en la rentabilidad, ajustando según sea necesario para maximizar el rendimiento.
+Segmentar promociones:
+Implementar campañas de descuentos específicas para segmentos de clientes, basándose en el comportamiento de compra en cada mercado.
+Estrategia para el cliente inactivo:
+Desarrollar una estrategia de retención o reactivación para el cliente que no ha facturado, como ofrecer promociones personalizadas o incentivos para su primera compra.
+
+LINK DASHBOARD TABLEAU: (Navegar en la version escritorio, para observar correcta distribucion)
+https://public.tableau.com/views/Case_VIZ_Portfolio/CustomerAnalysis?:language=es-ES&:sid=&:display_count=n&:origin=viz_share_link&:device=desktop
+						
