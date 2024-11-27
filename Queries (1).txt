@@ -1,0 +1,317 @@
+--QUERY 1 Conteo de registros únicos OFFENDERS List
+
+SELECT COUNT(DISTINCT a.OFFENDER_ID) AS Unique_Offenders_Transformed
+FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE" a;
+
+--QUERY 2 Conteo de registros únicos auditoria
+
+SELECT COUNT(DISTINCT b.AUDIT_ID) AS Unique_Audits_Actualizado
+FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_AUDIT" b;
+
+--QUERY 3 Conteo de registros compartidos en ambas tablas
+
+SELECT COUNT(DISTINCT a.ID_USER) AS Shared_Records
+FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE" a
+INNER JOIN "WHPRD_BI"."CUSTOMER"."CASE_TEMP_AUDIT" b ON a.ID_USER = b.ID_REP;
+
+--QUERY 4 Conteo de representantes sin auditar
+
+SELECT COUNT(DISTINCT a.ID_USER) AS Only_In_ML
+FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE" a
+LEFT JOIN "WHPRD_BI"."CUSTOMER"."CASE_TEMP_AUDIT" b ON a.ID_USER = b.ID_REP
+WHERE b.AUDIT_ID IS NULL;
+
+--QUERY 5 Conteo de representantes Auditados y no señalados
+
+SELECT COUNT(DISTINCT a.id_rep ) AS Only_In_ML
+FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_AUDIT" a
+LEFT JOIN "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE" b ON b.ID_USER = a.ID_REP
+WHERE b.OFFENDER_ID IS NULL;
+
+--QUERY 6 Conteo de representantes en ML List
+
+SELECT COUNT(DISTINCT a.id_user) AS conteo
+FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE" a;
+
+--QUERY 7 Conteo de representantes en ML List
+
+SELECT DISTINCT a.id_REP AS conteo
+FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_AUDIT" a;
+
+--QUERY 8 ID de representantes sin auditar
+
+WITH AUDITED AS (
+    SELECT DISTINCT ID_REP AS ID
+    FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_AUDIT"
+), 
+ML_LIST AS (
+    SELECT DISTINCT ID_USER AS ID
+    FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE"
+)
+SELECT ID
+FROM ML_LIST ml
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM AUDITED a
+    WHERE a.ID = ml.ID
+);
+
+-- QUERY 9 Recheck de diagrama de venn 
+
+WITH AUDITED AS (
+    SELECT DISTINCT ID_REP AS ID
+    FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_AUDIT"
+), 
+ML_LIST AS (
+    SELECT DISTINCT ID_USER AS ID
+    FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE"
+)
+SELECT ID
+FROM AUDITED a
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM ML_LIST ml
+    WHERE ml.ID = a.ID
+);
+
+--- QUERY 10 demostrar jerarquia entre supervisor, leader y usuario
+
+SELECT DISTINCT SUP, 
+    LEADER, 
+    ID_USER
+FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE"
+ORDER BY 1, 2, 3;
+
+--  QUERY 11 conteo jerarquico empleados a cargo 
+
+WITH Leaders_Count AS (
+    SELECT 
+        SUP, 
+        COUNT(DISTINCT LEADER) AS Total_Leaders_Under_Supervisor
+    FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE"
+    GROUP BY SUP
+),
+Users_Count AS (
+    SELECT 
+        SUP, 
+        LEADER, 
+        COUNT(DISTINCT ID_USER) AS Total_Users_Under_Leader
+    FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE"
+    GROUP BY SUP, LEADER
+)
+SELECT 
+    lc.SUP, 
+    lc.Total_Leaders_Under_Supervisor, 
+    uc.LEADER, 
+    uc.Total_Users_Under_Leader
+FROM Leaders_Count lc
+LEFT JOIN Users_Count uc ON lc.SUP = uc.SUP
+ORDER BY lc.SUP, uc.LEADER;
+
+-- QUERY 12 Incidencias/SKU/valor con conteo por SKU
+
+WITH User_Segments AS (
+    SELECT 
+        ID_USER, 
+        SKU, 
+        SUM(DETONATED) AS Total_Detonated,
+        NTILE(3) OVER (PARTITION BY SKU ORDER BY SUM(DETONATED) DESC) AS Rank_Segment
+    FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE"
+    GROUP BY ID_USER, SKU
+),
+Segment_Categorization AS (
+    SELECT 
+        ID_USER, 
+        SKU, 
+        Total_Detonated,
+        CASE 
+            WHEN Rank_Segment = 1 THEN 'Alto'
+            WHEN Rank_Segment = 2 THEN 'Medio'
+            ELSE 'Bajo'
+        END AS Segmento
+    FROM User_Segments
+)
+SELECT 
+    sc.ID_USER,
+    sc.Segmento,
+    COUNT(sc.SKU) AS Num_Times_Per_Segment
+FROM Segment_Categorization sc
+GROUP BY sc.ID_USER, sc.Segmento
+ORDER BY sc.ID_USER, sc.Segmento;
+
+
+--- QUERY 13 Tabla temporal para siguiente query -- Categorizado por incidencia/SKU/valor de usuarios
+
+CREATE OR REPLACE TEMPORARY TABLE Temp_Segment_Results AS
+WITH User_Segments AS (
+    SELECT 
+        ID_USER, 
+        SKU, 
+        SUM(DETONATED) AS Total_Detonated,
+        NTILE(5) OVER (PARTITION BY SKU ORDER BY SUM(DETONATED) DESC) AS Rank_Segment
+    FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE"
+    GROUP BY ID_USER, SKU
+),
+Segment_Categorization AS (
+    SELECT 
+        ID_USER, 
+        SKU, 
+        Total_Detonated,
+        CASE 
+            WHEN Rank_Segment = 1 THEN 'Muy Alto'
+            WHEN Rank_Segment = 2 THEN 'Alto'
+            WHEN Rank_Segment = 3 THEN 'Medio'
+            WHEN Rank_Segment = 4 THEN 'Bajo'
+            ELSE 'Muy Bajo'
+        END AS Segmento
+    FROM User_Segments
+),
+Ranked_Results AS (
+    SELECT 
+        sc.ID_USER,
+        sc.Segmento,
+        COUNT(sc.SKU) AS Num_Times_Per_Segment,
+        ROW_NUMBER() OVER (PARTITION BY sc.ID_USER ORDER BY COUNT(sc.SKU) DESC) AS Row_Num
+    FROM Segment_Categorization sc
+    GROUP BY sc.ID_USER, sc.Segmento
+)
+SELECT 
+    ID_USER,
+    Segmento
+FROM Ranked_Results
+WHERE Row_Num = 1
+ORDER BY ID_USER;
+
+
+-- QUERY 14 Jerarquia conteo de empleado categorizados por incidencia/SKU/valor
+
+WITH Leaders_Count AS (
+    SELECT 
+        SUP, 
+        COUNT(DISTINCT LEADER) AS Total_Leaders_Under_Supervisor
+    FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE"
+    GROUP BY SUP
+),
+Users_Count AS (
+    SELECT 
+        SUP, 
+        LEADER, 
+        ID_USER,
+        COUNT(DISTINCT ID_USER) AS Total_Users_Under_Leader
+    FROM "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE"
+    GROUP BY SUP, LEADER, ID_USER
+),
+Segment_Distribution AS (
+    SELECT 
+        uc.SUP,
+        uc.LEADER,
+        tsr.Segmento,
+        COUNT(DISTINCT tsr.ID_USER) AS Num_Employees_Per_Segment
+    FROM Users_Count uc
+    JOIN Temp_Segment_Results tsr ON uc.ID_USER = tsr.ID_USER
+    GROUP BY uc.SUP, uc.LEADER, tsr.Segmento
+)
+SELECT 
+    lc.SUP, 
+    lc.Total_Leaders_Under_Supervisor, 
+    uc.LEADER, 
+    sd.Segmento as Categoria_por_incidenca_valor,
+    SUM(sd.Num_Employees_Per_Segment) AS Total_empleados
+FROM Leaders_Count lc
+LEFT JOIN Users_Count uc ON lc.SUP = uc.SUP
+LEFT JOIN Segment_Distribution sd ON uc.LEADER = sd.LEADER
+GROUP BY lc.SUP, lc.Total_Leaders_Under_Supervisor, uc.LEADER, sd.Segmento
+ORDER BY lc.SUP, uc.LEADER, sd.Segmento;
+
+
+
+ --  QUERY 15 Verificar el total de registros y la distribución de 'TAREA'
+SELECT 
+    TAREA,
+    COUNT(distinct AUDIT_ID) AS Total_Registros,
+    COUNT(DISTINCT REPRESENTANTE) AS Total_Representantes
+FROM 
+    "WHPRD_BI"."CUSTOMER"."CASE_TEMP_AUDIT"
+GROUP BY 
+    TAREA
+ORDER BY 
+    Total_Registros DESC;
+
+-- QUERY 16 Comparación de los campos 'MELI' y 'SKU' entre las tablas
+
+SELECT 
+    a.MELI,
+    o.SKU,
+    COUNT(*) AS Coincidencias
+FROM 
+    "WHPRD_BI"."CUSTOMER"."CASE_TEMP_AUDIT" a
+inner JOIN 
+    "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE" o ON a.MELI = o.SKU
+GROUP BY 
+    a.MELI, o.SKU
+ORDER BY 
+    Coincidencias DESC;
+
+-- QUERY 17 Calcular la antigüedad de los representantes y compararla con antiguedad y numero de procesos. posible segmentacion, para detectar necesidad de entrenamiento
+
+SELECT 
+    REPRESENTANTE,
+    FECHA_INGRESO,
+    DATEDIFF('day', TO_DATE(FECHA_INGRESO, 'DD/MM/YYYY'), CURRENT_DATE) AS Antiguedad_Dias,
+    COUNT(distinct OFFENDER_ID) AS Total_Procesos
+FROM 
+    "WHPRD_BI"."CUSTOMER"."CASE_TEMP_AUDIT" a
+INNER JOIN 
+    "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE" o ON a.ID_REP = o.ID_USER
+GROUP BY 
+    REPRESENTANTE, FECHA_INGRESO
+ORDER BY 
+    Antiguedad_Dias DESC;
+
+    --- QUERY 18 Analizar SKU , posible segmentacion por desviacion estandar y sub agrupacion por usuarios
+
+SELECT 
+    SKU,
+    AVG(DETONATED) AS Promedio_DETONATED,
+    SUM(DETONATED) AS Total_DETONATED,
+    MAX(DETONATED) AS Max_DETONATED,
+    MIN(DETONATED) AS Min_DETONATED,
+    COUNT(*) AS Total_Registros,
+    STDDEV(DETONATED) AS Desviacion_Estandar_DETONATED
+FROM 
+    "WHPRD_BI"."CUSTOMER"."CASE_TEMP_OFFENSE"
+GROUP BY 
+    SKU
+ORDER BY 
+    Total_DETONATED DESC;
+
+-- Query 19 View por origen en tabla de auditoria, segmentar por tipo en los diferentes Type (recomendado normalizar nombres de los campos despues de entrevista con el negocio)
+
+SELECT 
+    ORIGEN,
+    TYPE,
+    TIPO,
+    COUNT(DISTINCT AUDIT_ID) AS Total_Registros,
+    COUNT(DISTINCT REPRESENTANTE) AS Total_Representantes
+FROM 
+    "WHPRD_BI"."CUSTOMER"."CASE_TEMP_AUDIT"
+GROUP BY 
+    ORIGEN, TYPE, TIPO
+ORDER BY 
+    Total_Registros DESC;
+
+-- Query 20 Representantes con mas false en auditoria agrupados por tarea para detectar, lugar o tarea del fallo
+
+SELECT 
+    ID_REP, REPRESENTANTE
+    TIPO,
+    TAREA,
+    COUNT(AUDIT_ID) AS Total_Registros_Falsos
+FROM 
+    "WHPRD_BI"."CUSTOMER"."CASE_TEMP_AUDIT"
+WHERE 
+    TIPO = 'FALSE'
+GROUP BY 
+    1, REPRESENTANTE, TIPO, TAREA
+ORDER BY 
+    Total_Registros_Falsos DESC;
